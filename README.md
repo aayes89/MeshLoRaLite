@@ -1,8 +1,8 @@
 # MeshLoRaLite_CLI
 
-Firmware para nodos LoRa en malla (mesh) basado en **STM32F1** + **SX1262** (RadioLib) con interfaz de comandos por puerto serie (CLI), soporte para mensajes unicast/broadcast, reenvío inteligente y configuración persistente en Flash.
-
-Probado en **DX-SMART DX-PJ26-V1.1** + **DX-LR30**.
+Firmware para nodos LoRa en malla (mesh) basado en **STM32F1** + **SX1262** (RadioLib) con interfaz de comandos por puerto serie (CLI), soporte para mensajes unicast/broadcast, reenvío inteligente y configuración persistente en Flash. <br>
+Escrito 100% en Arduino IDE y probado en **DX-SMART DX-PJ26-V1.1** + **DX-LR30**.<br>
+Para subir el binario al STM32 ver el siguiente repositorio: <a href="https://github.com/aayes89/STM32F1-serie">STM32F1-serie</a>
 
 Proyecto orientado a redes LoRa de bajo costo, larga distancia y bajo consumo para aplicaciones como monitoreo distribuido, comunicación off-grid o experimentación con mesh descentralizado.
 
