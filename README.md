@@ -9,14 +9,14 @@ Proyecto orientado a redes LoRa de bajo costo, larga distancia y bajo consumo pa
 ## Características principales
 
 - **Topología mesh flooding** con TTL (Time To Live) configurable
-- Mensajes **unicast** y **broadcast** (0xFFFF)
+- Mensajes **unicast** (nodoID) y **broadcast** (0xFFFF)
 - Detección y eliminación de duplicados (cache de últimos mensajes vistos)
-- **Beacon periódico** para descubrimiento de nodos vecinos
+- **Beacon periódico (30s)** para descubrimiento de nodos vecinos (ajustar)
 - Interfaz CLI completa por puerto serie (115200 por defecto, configurable)
 - Comandos: `send`, `broadcast`, `set`, `get`, `save`, `load`, `status`, `reboot`, etc.
 - Configuración persistente en última página de Flash (frecuencia, SF, BW, CR, potencia, TTL, beacon, debug)
 - Control de nivel de depuración persistente (`set debug on/off`)
-- Uso de **RadioLib** para manejo del SX1262
+- Uso de **RadioLib** para manejo del DX-LR30 (SX1262)
 - Generación de **NodeID único** basado en UID del chip STM32 + CRC16
 - Jitter aleatorio en envíos y reenvíos para reducir colisiones
 
