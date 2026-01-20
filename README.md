@@ -47,7 +47,7 @@ Proyecto orientado a redes LoRa de bajo costo, larga distancia y bajo consumo pa
 1. Clona el repositorio
    ```bash
    git clone https://github.com/aayes89/MeshLoRaLite.git
-2. Abre el proyecto en PlatformIO / Arduino IDE (recomendado PlatformIO)
+2. Abre el proyecto en Arduino IDE 
 3. Conecta el nodo por USB y sube el firmware
 4. Abre el monitor serie a 115200 baud (o el que hayas configurado)
 
