@@ -10,6 +10,7 @@ Proyecto orientado a redes LoRa de bajo costo, larga distancia y bajo consumo pa
 
 - **Topología mesh flooding** con TTL (Time To Live) configurable
 - Mensajes **unicast** (nodoID) y **broadcast** (0xFFFF)
+- Configuración de canal lógico (`chan`) persistida en Flash (Permite segmentar redes mesh en la misma frecuencia física.)
 - Detección y eliminación de duplicados (cache de últimos mensajes vistos)
 - **Beacon periódico (30s)** para descubrimiento de nodos vecinos (ajustar)
 - Interfaz CLI completa por puerto serie (115200 por defecto, configurable)
@@ -19,6 +20,8 @@ Proyecto orientado a redes LoRa de bajo costo, larga distancia y bajo consumo pa
 - Uso de **RadioLib** para manejo del DX-LR30 (SX1262)
 - Generación de **NodeID único** basado en UID del chip STM32 + CRC16
 - Jitter aleatorio en envíos y reenvíos para reducir colisiones
+- ACKs y confirmaciones de entrega
+- Lista de vecinos detectados vía beacons
 
 ## Requisitos de hardware
 
@@ -48,50 +51,62 @@ Proyecto orientado a redes LoRa de bajo costo, larga distancia y bajo consumo pa
 3. Conecta el nodo por USB y sube el firmware
 4. Abre el monitor serie a 115200 baud (o el que hayas configurado)
 
-## Comandos básicos:
-
-- status                  → muestra info del nodo
-- send 4CA9 hola mundo    → envía mensaje unicast al nodo 0x4CA9
-- broadcast Alerta!       → envía a todos los nodos
-- set freq 868000000      → cambia frecuencia (Hz)
-- set sf 9                → spreading factor 7-12
-- set bw 250              → bandwidth en kHz
-- set power 14            → potencia dBm
-- set debug on            → activa logs detallados
-- save                    → guarda configuración en Flash
-- reboot                  → reinicia el nodo
-
 ## Comandos disponibles:
 
-- help
-- get [all|radio|mesh]
-- set <key> <value>     (freq, sf, bw, cr, ttl, beacon, power, debug)
-- save
-- load
-- reboot
-- send <NODEID> <mensaje>
-- broadcast <mensaje>
-- status
+- help                    → muestra el menu de comandos
+- get [all|radio|mesh]    → obtiene información específica del módulo
+- status                  → muestra info del nodo
+- send <NODEID> <mensaje> → envía mensaje unicast al nodo 0x4CA9
+- broadcast <mensaje>     → envía a todos los nodos
+- set freq 868000000      → cambia frecuencia (Hz)
+- set sf 9                → spreading factor 7-12
+- set bw 250              → ancho de banda en kHz
+- set cr <4 a 8>          → tasa de codificación
+- set ttl <0 a 10 (máx)>  → tiempo de vida
+- set beacon <NODEID>     → ID del nodo (faro)
+- set power <-9 a 22>     → potencia dBm
+- set debug <on|off|1|0>  → logs detallados
+- set chan <0 a 255>      → modifica el canal de transmisión
+- set baud <115200>       → baudios
+- nodes                   → devuelve la información sobre los nodos cercanos enlistados
+- nodes clear             → limpia la tabla de nodos cercanos
+- save                    → guarda configuración en Flash
+- load                    → carga la configuración del Flash
+- reboot                  → reinicia el nodo
 
 * NodeID se ingresa en formato hexadecimal sin 0x (ej: 6019, 4ca9, etc.) — coincide con el valor mostrado al iniciar.
 * Configuración persistente. Todos los parámetros se guardan en la última página de Flash (1 KB reservado). Al iniciar, se carga automáticamente. Si falla, usa valores por defecto.
 
-## Desarrollo y depuración
+## Desarrollo
 
+### Canal lógico: 
+* Cada paquete lleva un campo `chan` en su header mesh.
+* El nodo solo procesa mensajes cuyo `chan` coincida con el canal actual configurado.
+* Esto permite coexistir varias redes mesh en la misma frecuencia física evitando colisiones indeseadas.
+
+### Reconocimiento y reitentos
+* Los paquetes unicast esperan ACK de destino.
+* Si no se recibe dentro de ~3 s, se reintenta hasta 2 veces.
+* El contenido original se guarda para reenviar correctamente (no solo header).
+
+### Tabla de vecinos
+* Nodos detectados vía beacons se registran con RSSI/SNR y tiempo.
+* Se limpia automáticamente si no llegan beacons por ~90 s.
+
+## Depuración
 Activa/desactiva logs detallados:
 - set debug on
 - set debug off
 - save
 
-Logs condicionados a la variable debug (volatile bool sincronizada con cfg.debug)
+* RSSI y SNR se muestran automáticamente en logs RX si debug está activado.
+* Logs condicionados a la variable debug (volatile bool sincronizada con cfg.debug)
 
 ##  Limitaciones conocidas / Futuro
 
 - Solo flooding (no routing inteligente aún)
-- No ACKs ni confirmaciones de entrega
 - Tamaño máximo payload ~200 bytes
 - Pendiente: soporte dinámico para cambio de baudrate serie sin reinicio completo
-- Pendiente: lista de vecinos detectados vía beacons
 - Pendiente: integración con apps/web (WebSerial, Bluetooth, etc.)
 
 ## Licencia
