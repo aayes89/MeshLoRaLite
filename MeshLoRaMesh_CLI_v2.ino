@@ -1,4 +1,5 @@
-// ========================== MeshLoRaMesh_CLI_v2.ino ==========================
+// ========================== MeshLoRaLite_CLI_v2 by Slam 2026 ==========================
+
 #include <Arduino.h>
 #include <SPI.h>
 #include <RadioLib.h>
@@ -30,11 +31,29 @@ SX1262 radio = new Module(LORA_NSS, LORA_DIO1, LORA_NRST, LORA_BUSY);
 #define SEEN_CACHE 32
 #define MESH_VER 1
 #define UART_SPEED 115200
+#define NODE_TABLE_SIZE 16     // cantidad máxima de nodos
+#define NODE_TIMEOUT_MS 90000  // 90s antes de actualizar tabla de nodos
+#define MAX_PENDING 4
 
 enum { PKT_DATA = 1,
-       PKT_BEACON = 2 };
+       PKT_BEACON = 2,
+       PKT_ACK = 3 };
 
 /* ================= STRUCTS ================= */
+typedef struct {
+  uint16_t id;
+  int8_t rssi;
+  int8_t snr;
+  uint32_t lastSeen;
+} node_t;
+typedef struct {
+  uint16_t id;
+  uint16_t dst;
+  uint32_t ts;
+  uint8_t retries;
+  uint8_t len;
+  uint8_t payload[64];  // tamaño razonable y fijo
+} pending_t;
 typedef struct __attribute__((packed)) {
   uint32_t freq;
   uint32_t baud;
@@ -47,7 +66,6 @@ typedef struct __attribute__((packed)) {
   uint16_t debug;  // 0-false, 1-true
   uint16_t crc;
 } mesh_cfg_t;
-
 typedef struct __attribute__((packed)) {
   uint8_t ver;
   uint8_t type;
@@ -56,13 +74,12 @@ typedef struct __attribute__((packed)) {
   uint16_t id;
   uint8_t ttl;
   uint16_t len;
+  uint8_t chan;
 } mesh_hdr_t;
-
 typedef struct {
   uint16_t src;
   uint16_t id;
 } seen_t;
-
 /* ================= GLOBALS ================= */
 mesh_cfg_t cfg;
 uint8_t txBuf[MAX_PKT], rxBuf[MAX_PKT];
@@ -73,27 +90,29 @@ uint16_t msgID = 0;
 volatile bool rxFlag = false, txFlag = false;
 volatile bool debug = false;
 uint32_t lastBeacon = 0;
+uint8_t nodeCount = 0;
+node_t nodes[NODE_TABLE_SIZE];
+pending_t pend[MAX_PENDING];
+uint32_t lastPrune = 0;
+uint8_t meshChan = 0;
 
 /* ================= IRQ ================= */
 void onRx() {
   rxFlag = true;
-  if (debug) Serial.println("[IRQ RX] DETECTADO! Paquete en el aire");
 }
 void onTx() {
   txFlag = true;
 }
-
 /* ================= CRC ================= */
-uint16_t crc16(const uint8_t* d, size_t l) {
-  uint16_t c = 0xFFFF;
-  while (l--) {
-    c ^= *d++;
-    for (uint8_t i = 0; i < 8; i++)
-      c = (c & 1) ? (c >> 1) ^ 0xA001 : (c >> 1);
+uint16_t crc16_ccitt_false(const uint8_t* data, size_t len) {
+  uint16_t crc = 0xFFFF;
+  while (len--) {
+    crc ^= (uint16_t)(*data++) << 8;
+    for (int i = 0; i < 8; i++)
+      crc = (crc & 0x8000) ? (crc << 1) ^ 0x1021 : (crc << 1);
   }
-  return c;
+  return crc;
 }
-
 /* ================= NODE ID ================= */
 uint16_t genNodeID() {
   uint32_t uid[3] = {
@@ -101,7 +120,32 @@ uint16_t genNodeID() {
     *(uint32_t*)0x1FFFF7EC,
     *(uint32_t*)0x1FFFF7F0
   };
-  return crc16((uint8_t*)uid, 12);
+  return crc16_ccitt_false((uint8_t*)uid, 12);
+}
+/* ================= NODOS ================= */
+void updateNode(uint16_t id, int8_t rssi, int8_t snr) {
+  uint32_t now = millis();
+
+  for (uint8_t i = 0; i < nodeCount; i++) {
+    if (nodes[i].id == id) {
+      nodes[i].rssi = rssi;
+      nodes[i].snr = snr;
+      nodes[i].lastSeen = now;
+      return;
+    }
+  }
+
+  if (nodeCount < NODE_TABLE_SIZE) {
+    nodes[nodeCount++] = { id, rssi, snr, now };
+  }
+}
+void pruneNodes() {
+  uint32_t now = millis();
+  for (int i = nodeCount - 1; i >= 0; i--) {
+    if (now - nodes[i].lastSeen > NODE_TIMEOUT_MS) {
+      nodes[i] = nodes[--nodeCount];
+    }
+  }
 }
 /* ================= BW y CR =================*/
 uint8_t bwToRadio(uint16_t bw) {
@@ -119,7 +163,6 @@ uint8_t bwToRadio(uint16_t bw) {
     default: return RADIOLIB_SX126X_LORA_BW_125_0;
   }
 }
-
 uint8_t crToRadio(uint8_t cr) {
   switch (cr) {
     case 5: return RADIOLIB_SX126X_LORA_CR_4_5;
@@ -129,17 +172,15 @@ uint8_t crToRadio(uint8_t cr) {
     default: return RADIOLIB_SX126X_LORA_CR_4_5;
   }
 }
-
 /* ================= FLASH ================= */
 bool loadConfig() {
   mesh_cfg_t* f = (mesh_cfg_t*)FLASH_CFG_ADDR;
-  if (crc16((uint8_t*)f, sizeof(mesh_cfg_t) - 2) != f->crc) return false;
+  if (crc16_ccitt_false((uint8_t*)f, sizeof(mesh_cfg_t) - 2) != f->crc) return false;
   memcpy(&cfg, f, sizeof(cfg));
   return true;
 }
-
 void saveConfig() {
-  cfg.crc = crc16((uint8_t*)&cfg, sizeof(cfg) - 2);
+  cfg.crc = crc16_ccitt_false((uint8_t*)&cfg, sizeof(cfg) - 2);
   HAL_FLASH_Unlock();
 
   FLASH_EraseInitTypeDef EraseInit = { 0 };
@@ -167,12 +208,10 @@ void saveConfig() {
   HAL_FLASH_Lock();
   Serial.println("Config saved");
 }
-
 /* ================= RADIO ================= */
 void radioRX() {
   radio.startReceive();
 }
-
 void radioTX(uint8_t* d, size_t l) {
   txFlag = false;
   int err = radio.startTransmit(d, l);
@@ -181,47 +220,121 @@ void radioTX(uint8_t* d, size_t l) {
     radio.startReceive();
   }
 }
-/* ================= MESH ================= */
+bool shouldForward(int8_t rssi, uint8_t ttl) {
+  if (ttl == 0) return false;
+  if (rssi < -115) return false;
+  if (rssi > -90) return true;
+  return random(0, 100) < 40;  // 40% chance
+}
+/* ================= SEEN ================= */
 bool seenBefore(uint16_t s, uint16_t i) {
   for (uint8_t k = 0; k < SEEN_CACHE; k++)
     if (seen[k].src == s && seen[k].id == i) return true;
   return false;
 }
-
 void markSeen(uint16_t s, uint16_t i) {
   seen[seenIdx++] = { s, i };
   seenIdx %= SEEN_CACHE;
 }
+/* ================= SEND ================= */
+void sendPktEx(uint8_t type, uint16_t dst, const uint8_t* payload, uint8_t len, uint8_t ttl) {
+  if (len > MAX_PKT - sizeof(mesh_hdr_t) - 2) return;
 
-void sendPkt(uint8_t type, uint16_t dst, const uint8_t* payload, uint8_t len) {
-  if (len > MAX_PKT - sizeof(mesh_hdr_t)) return;
-  mesh_hdr_t h = { MESH_VER, type, nodeID, dst, msgID++, cfg.ttl, len };
+  mesh_hdr_t h = { MESH_VER, type, nodeID, dst, msgID++, ttl, len, meshChan };
+
   markSeen(h.src, h.id);
+  if (type == PKT_DATA && dst != NODE_BCAST) {
+    for (uint8_t i = 0; i < MAX_PENDING; i++) {
+      if (!pend[i].id) {
+        pend[i].id = h.id;
+        pend[i].dst = dst;
+        pend[i].ts = millis();
+        pend[i].retries = 0;
+        pend[i].len = len;
+        memcpy(pend[i].payload, payload, len);
+        break;
+      }
+    }
+  }
 
   uint16_t pos = 0;
   memcpy(txBuf + pos, &h, sizeof(h));
   pos += sizeof(h);
-  if (len) {
+
+  if (len && payload) {
     memcpy(txBuf + pos, payload, len);
     pos += len;
   }
 
-  if (debug) Serial.printf("[SEND] Preparing TX: type=%u dst=%04X len=%u total_bytes=%u\n", type, dst, len, pos);
-  radioTX(txBuf, pos);
+  uint16_t crc = crc16_ccitt_false(txBuf, pos);
+  memcpy(txBuf + pos, &crc, 2);
+  pos += 2;
+  if (debug) {
+    Serial.printf("[SEND] type=%u dst=%04X len=%u bytes=%u\n",
+                  type, dst, len, pos);
+  }
+  radio.startTransmit(txBuf, pos);
 }
-void handlePkt(uint8_t* b, size_t l) {
-  if (l < sizeof(mesh_hdr_t)) return;
+void sendPkt(uint8_t type, uint16_t dst, const uint8_t* payload, uint8_t len) {
+  sendPktEx(type, dst, payload, len, (type == PKT_ACK || type == PKT_BEACON) ? 1 : cfg.ttl);
+}
+/* ================= RESEND ================= */
+void resend(pending_t& p) {
+  mesh_hdr_t h = { MESH_VER, PKT_DATA, nodeID, p.dst, p.id, cfg.ttl, p.len, meshChan };
 
+  uint16_t pos = 0;
+  memcpy(txBuf + pos, &h, sizeof(h));
+  pos += sizeof(h);
+
+  memcpy(txBuf + pos, p.payload, p.len);
+  pos += p.len;
+
+  uint16_t crc = crc16_ccitt_false(txBuf, pos);
+  memcpy(txBuf + pos, &crc, 2);
+  pos += 2;
+
+  radio.startTransmit(txBuf, pos);
+}
+/* ================= RX ================= */
+void handlePkt(uint8_t* b, size_t l) {
+  if (l < sizeof(mesh_hdr_t) + 2) return;
+
+  // CRC RX
+  uint16_t rxCrc;
+  memcpy(&rxCrc, b + l - 2, 2);
+  if (rxCrc != crc16_ccitt_false(b, l - 2)) {
+    if (debug) Serial.println("[DROP] CRC mismatch");
+    return;
+  }
   mesh_hdr_t h;
   memcpy(&h, b, sizeof(h));
   if (h.ver != MESH_VER) return;
+  if (h.chan != meshChan) return;  // filtro de canal lógico
   if (seenBefore(h.src, h.id)) return;
   markSeen(h.src, h.id);
 
-  if (h.type == PKT_BEACON)
-    Serial.printf("[BEACON] %04X\n", h.src);
+  int8_t rssi = radio.getRSSI();
+  int8_t snr = radio.getSNR();
+  updateNode(h.src, rssi, snr);
 
-  if (h.type == PKT_DATA) {
+  if (h.type == PKT_BEACON) {  // BEACON
+    Serial.printf("[BEACON] %04X\n", h.src);
+    return;
+  }
+  if (h.type == PKT_ACK) {  // ACK (nunca forward)
+    uint16_t acked;
+    memcpy(&acked, b + sizeof(mesh_hdr_t), sizeof(uint16_t));
+    if (debug) Serial.printf("[ACK RX] from %04X for msg %u\n", h.src, acked);
+    for (uint8_t i = 0; i < MAX_PENDING; i++) {
+      if (pend[i].id == acked && pend[i].dst == h.src) {
+        pend[i].id = 0;
+        break;
+      }
+    }
+    return;
+  }
+  if (h.type == PKT_DATA) {  // DATA
+    if (h.type != PKT_DATA) return;
     bool isForMe = (h.dst == nodeID);
     bool isBroadcast = (h.dst == NODE_BCAST);
 
@@ -230,23 +343,34 @@ void handlePkt(uint8_t* b, size_t l) {
       Serial.print("[MSG] ");
       Serial.write(b + sizeof(mesh_hdr_t), h.len);
       Serial.printf("  ← from %04X  dst=%04X  id=%u\n", h.src, h.dst, h.id);
+      if (isForMe) sendPkt(PKT_ACK, h.src, (uint8_t*)&h.id, sizeof(h.id));
     }
 
-    // 2. Reenvío SOLO si:
-    // - tiene TTL restante
-    // - NO lo generé yo
+    // 2. Reenvío SOLO si: tiene TTL restante, NO lo generé yo o
     // - es broadcast (flooding) O todavía no llegó al destino (unicast en ruta)
-    if (h.ttl > 0 && h.src != nodeID && (isBroadcast || !isForMe)) {
+    if (h.ttl > 0 && h.src != nodeID && (isBroadcast || !isForMe) && shouldForward(rssi, h.ttl)) {
       h.ttl--;
-      memcpy(txBuf, &h, sizeof(h));
-      memcpy(txBuf + sizeof(h), b + sizeof(h), h.len);
-      delay(random(40, 150));
-      Serial.printf("[FWD] src=%04X → dst=%04X ttl=%d len=%d\n", h.src, h.dst, h.ttl, h.len);
-      radioTX(txBuf, sizeof(h) + h.len);
+
+      uint16_t pos = 0;
+      memcpy(txBuf + pos, &h, sizeof(h));
+      pos += sizeof(h);
+
+      memcpy(txBuf + pos, b + sizeof(mesh_hdr_t), h.len);
+      pos += h.len;
+
+      uint16_t crc = crc16_ccitt_false(txBuf, pos);
+      memcpy(txBuf + pos, &crc, 2);
+      pos += 2;
+
+      delay(random(10, 30) * h.ttl);
+
+      if (debug) Serial.printf("[FWD] src=%04X → dst=%04X ttl=%u len=%u\n",
+                               h.src, h.dst, h.ttl, h.len);
+
+      radioTX(txBuf, pos);
     }
   }
 }
-
 uint16_t parseNodeID(const char* s) {
   // Parsea como Hex
   // Esto permite: 6019 → 0x6019, 4ca9 → 0x4ca9, 4CA9 → 0x4CA9
@@ -261,7 +385,6 @@ uint16_t parseNodeID(const char* s) {
 
   return (uint16_t)val;
 }
-
 /* ================= CLI ================= */
 // Gestión de comandos de cliente
 void cli(char* l) {
@@ -383,6 +506,21 @@ void cli(char* l) {
     sendPkt(PKT_DATA, NODE_BCAST, (uint8_t*)msg, strlen(msg));
   }
 }
+/* ================= UTILS ================= */
+void processPending() {
+  uint32_t now = millis();
+  for (uint8_t i = 0; i < MAX_PENDING; i++) {
+    if (pend[i].id && now - pend[i].ts > 3000) {
+      if (pend[i].retries < 2) {
+        resend(pend[i]);
+        pend[i].retries++;
+        pend[i].ts = now;
+      } else {
+        pend[i].id = 0;
+      }
+    }
+  }
+}
 /* ================= SETUP ================= */
 void setup() {
   nodeID = genNodeID();
@@ -502,11 +640,22 @@ void loop() {
 
   if (txFlag) {
     txFlag = false;
-    radio.finishTransmit();
+    // Esperar que el chip realmente termine (BUSY baja)
+    uint32_t timeout = millis() + 100;
+    while (digitalRead(LORA_BUSY) && millis() < timeout) {
+      delay(1);
+    }
+    int state = radio.finishTransmit();
+    if (state != RADIOLIB_ERR_NONE && debug) {
+      Serial.printf("[TX finish failed] %d\n", state);
+    }
     radio.standby();
-    delay(2);
     radio.setRxBoostedGainMode(true);
     radio.startReceive();
-    if (debug) Serial.println("[TX COMPLETE] IRQ TX received");
+  }
+
+  if (millis() - lastPrune > 5000) {
+    pruneNodes();
+    lastPrune = millis();
   }
 }
