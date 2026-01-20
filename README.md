@@ -8,7 +8,7 @@ Proyecto orientado a redes LoRa de bajo costo, larga distancia y bajo consumo pa
 
 ## Características principales
 
-- **Topología mesh flooding** con TTL (Time To Live) configurable
+- **Topología mesh** basada en flooding controlado con TTL y supresión de duplicados
 - Mensajes **unicast** (nodoID) y **broadcast** (0xFFFF)
 - Configuración de canal lógico (`chan`) persistida en Flash (Permite segmentar redes mesh en la misma frecuencia física.)
 - Detección y eliminación de duplicados (cache de últimos mensajes vistos)
@@ -147,4 +147,4 @@ MIT License
 ## Contribuciones
 **¡Bienvenidas!**<br>
 Abre un issue o pull request si quieres agregar ACKs (backoff adaptativo, métricas, etc.), encriptación simple, mejor manejo de colisiones, visualización de topología, etc.<br>
-¡Gracias por probar MeshLoRaMesh!
+¡Gracias por probar MeshLoRaLite!
