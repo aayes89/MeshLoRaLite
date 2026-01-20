@@ -56,9 +56,9 @@ Proyecto orientado a redes LoRa de bajo costo, larga distancia y bajo consumo pa
 - help                    → muestra el menu de comandos
 - get [all|radio|mesh]    → obtiene información específica del módulo
 - status                  → muestra info del nodo
-- send <NODEID> <mensaje> → envía mensaje unicast al nodo 0x4CA9
+- send <NODEID> <mensaje> → envía mensaje unicast al nodo 0xXXXX
 - broadcast <mensaje>     → envía a todos los nodos
-- set freq 868000000      → cambia frecuencia (Hz)
+- set freq 915000000      → cambia frecuencia (Hz)
 - set sf 9                → spreading factor 7-12
 - set bw 250              → ancho de banda en kHz
 - set cr <4 a 8>          → tasa de codificación
@@ -74,7 +74,7 @@ Proyecto orientado a redes LoRa de bajo costo, larga distancia y bajo consumo pa
 - load                    → carga la configuración del Flash
 - reboot                  → reinicia el nodo
 
-* NodeID se ingresa en formato hexadecimal sin 0x (ej: 6019, 4ca9, etc.) — coincide con el valor mostrado al iniciar.
+* NodeID se ingresa en formato hexadecimal sin 0x (ej: 6019, 4CA9, etc.) — coincide con el valor mostrado al iniciar.
 * Configuración persistente. Todos los parámetros se guardan en la última página de Flash (1 KB reservado). Al iniciar, se carga automáticamente. Si falla, usa valores por defecto.
 
 ## Desarrollo
