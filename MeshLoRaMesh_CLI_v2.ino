@@ -1,4 +1,4 @@
-// ========================== MeshLoRaLite_CLI_v2 by Slam 2026 ==========================
+// ========================== MeshLoRaLite by Slam 2026 ==========================
 
 #include <Arduino.h>
 #include <SPI.h>
@@ -62,19 +62,20 @@ typedef struct __attribute__((packed)) {
   uint8_t bw;
   uint8_t cr;
   uint8_t ttl;
+  uint8_t chan;
   int8_t power;
   uint16_t debug;  // 0-false, 1-true
   uint16_t crc;
 } mesh_cfg_t;
 typedef struct __attribute__((packed)) {
-  uint8_t ver;
-  uint8_t type;
+  uint8_t  ver;
+  uint8_t  type;
   uint16_t src;
   uint16_t dst;
   uint16_t id;
-  uint8_t ttl;
+  uint8_t  ttl;
   uint16_t len;
-  uint8_t chan;
+  uint8_t  chan;
 } mesh_hdr_t;
 typedef struct {
   uint16_t src;
@@ -392,7 +393,7 @@ void cli(char* l) {
   char* c = strtok(l, " ");
   if (!c) return;
   if (!strcmp(c, "help")) {
-    Serial.println("Comandos: \n\tget [all/radio/mesh]\n\tset <key> <val>\n\tsave\n\tload\n\treboot\n\tsend <dst> <msg>\n\tbroadcast <msg>\n\tstatus");
+    Serial.println("Comandos: \n\tget [all/radio/mesh]\n\tset <key> <val>\n\tsave\n\tload\n\treboot\n\tsend <dst> <msg>\n\tbroadcast <msg>\n\tstatus\n\tnodes\n\tnodes clear");
     return;
   }
   if (!strcmp(c, "get")) {
@@ -404,7 +405,7 @@ void cli(char* l) {
       Serial.printf("freq=%lu sf=%u bw=%u cr=%u power=%d\n",
                     cfg.freq, cfg.sf, cfg.bw, cfg.cr, cfg.power);
     } else if (!strcmp(p, "mesh")) {
-      Serial.printf("ttl=%u beacon=%lu\n", cfg.ttl, cfg.beacon_ms);
+      Serial.printf("ttl=%u beacon=%lu chan=%u\n", cfg.ttl, cfg.beacon_ms, meshChan);
     }
   }
   if (!strcmp(c, "set")) {
@@ -459,6 +460,15 @@ void cli(char* l) {
       } else {
         Serial.println("Baud inválido (1200-2000000)");
       }
+    } else if (!strcmp(k, "chan")) {
+      int val = atoi(v);
+      if (val < 0 || val > 255) {
+        Serial.println("chan 0-255");
+        return;
+      }
+      cfg.chan = (uint8_t)val;
+      meshChan = cfg.chan;
+      Serial.printf("Channel set to %u\n", meshChan);
     } else if (!strcmp(k, "debug")) {
       if (!strcmp(v, "on") || !strcmp(v, "true") || !strcmp(v, "1")) {
         cfg.debug = 1;
@@ -484,6 +494,23 @@ void cli(char* l) {
     Serial.printf("Node: %04X | Freq: %lu MHz | SF: %u | BW: %u kHz | Power: %d dBm | Debug: %s\n",
                   nodeID, cfg.freq / 1000000, cfg.sf, cfg.bw, cfg.power,
                   debug ? "ON" : "OFF");
+  }
+  if (!strcmp(c, "nodes")) {
+    char* sub = strtok(NULL, " ");
+    if (sub && !strcmp(sub, "clear")) {
+      nodeCount = 0;
+      Serial.println("Node table cleared");
+      return;
+    } else {
+      Serial.printf("Neighbors (%u):\n", nodeCount);
+      for (uint8_t i = 0; i < nodeCount; i++) {
+        Serial.printf("  %04X  RSSI=%d  SNR=%d  age=%lus\n",
+                      nodes[i].id,
+                      nodes[i].rssi,
+                      nodes[i].snr,
+                      (millis() - nodes[i].lastSeen) / 1000);
+      }
+    }
   }
   if (!strcmp(c, "send")) {
     char* dstStr = strtok(NULL, " ");
@@ -536,8 +563,11 @@ void setup() {
     cfg.ttl = 4;
     cfg.power = 5;  // Bajo para prueba
     cfg.debug = 0;
+    cfg.chan = 0;
+    meshChan = 0;
   }
   debug = (cfg.debug != 0);
+  meshChan = cfg.chan;
 
   pinMode(LED_PIN, OUTPUT);
   pinMode(LORA_NRST, OUTPUT);  // Estado RF seguro al arranque: RX
@@ -558,9 +588,6 @@ void setup() {
   delay(10);
   digitalWrite(LORA_NRST, HIGH);
   delay(20);
-
-  // Log params para depurar
-  Serial.printf("Init with Freq: %.1f MHz, BW: %u, SF: %u, CR: %u\n", cfg.freq / 1000000.0, cfg.bw, cfg.sf, cfg.cr);
 
   int state = radio.begin(
     cfg.freq / 1000000.0,
