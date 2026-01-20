@@ -63,7 +63,7 @@ Proyecto orientado a redes LoRa de bajo costo, larga distancia y bajo consumo pa
 - set bw 250              → ancho de banda en kHz
 - set cr <4 a 8>          → tasa de codificación
 - set ttl <0 a 10 (máx)>  → tiempo de vida
-- set beacon <NODEID>     → ID del nodo (faro)
+- set beacon <ms>         → intervalo de envío de beacon. Ej: 30000
 - set power <-9 a 22>     → potencia dBm
 - set debug <on|off|1|0>  → logs detallados
 - set chan <0 a 255>      → modifica el canal de transmisión
@@ -83,6 +83,7 @@ Proyecto orientado a redes LoRa de bajo costo, larga distancia y bajo consumo pa
 * Cada paquete lleva un campo `chan` en su header mesh.
 * El nodo solo procesa mensajes cuyo `chan` coincida con el canal actual configurado.
 * Esto permite coexistir varias redes mesh en la misma frecuencia física evitando colisiones indeseadas.
+* El canal lógico no cifra ni aísla tráfico, solo filtra.
 
 ### Reconocimiento y reitentos
 * Los paquetes unicast esperan ACK de destino.
@@ -102,17 +103,48 @@ Activa/desactiva logs detallados:
 * RSSI y SNR se muestran automáticamente en logs RX si debug está activado.
 * Logs condicionados a la variable debug (volatile bool sincronizada con cfg.debug)
 
-##  Limitaciones conocidas / Futuro
+## Persistencia en Flash
 
+Se guarda:
+- Parámetros de radio
+- TTL, beacon, debug, canal lógico
+
+NO se guarda:
+- Tabla de vecinos
+- Cache de paquetes vistos
+- Cola de reintentos
+
+## Arquitectura interna (resumen)
+
+- Radio en RX continuo con interrupciones (DIO1)
+- TX no bloqueante + retorno explícito a RX
+- Cache de paquetes vistos (src + id)
+- Cola de paquetes pendientes para reintentos unicast
+- Reenvío condicionado por TTL, destino y canal lógico
+
+## Consideraciones de memoria y limitaciones
+
+STM32F103C8T6 (~20 KB RAM):
+- Tamaño de tablas y buffers es fijo y limitado ( payload ~64 bytes )
+- Optimizado para redes pequeñas / medianas
+- No apto para cientos de nodos simultáneos
 - Solo flooding (no routing inteligente aún)
-- Tamaño máximo payload ~200 bytes
 - Pendiente: soporte dinámico para cambio de baudrate serie sin reinicio completo
 - Pendiente: integración con apps/web (WebSerial, Bluetooth, etc.)
+
+## Diagrama lógico
+```
+TX → Radio → Aire → RX ISR → handlePkt()
+                  ↓
+             Filtro (ver/chan/seen)
+                  ↓
+           Procesar / Forward / ACK
+```
 
 ## Licencia
 MIT License
 
 ## Contribuciones
 **¡Bienvenidas!**<br>
-Abre un issue o pull request si quieres agregar ACKs, encriptación simple, mejor manejo de colisiones, visualización de topología, etc.<br>
+Abre un issue o pull request si quieres agregar ACKs (backoff adaptativo, métricas, etc.), encriptación simple, mejor manejo de colisiones, visualización de topología, etc.<br>
 ¡Gracias por probar MeshLoRaMesh!
