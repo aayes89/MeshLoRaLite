@@ -6,6 +6,8 @@ Para subir el binario al STM32 ver el siguiente repositorio: <a href="https://gi
 
 Proyecto orientado a redes LoRa de bajo costo, larga distancia y bajo consumo para aplicaciones como monitoreo distribuido, comunicación off-grid o experimentación con mesh descentralizado.
 
+***<h3>Nuevo: Aplicación cliente para Android añadida</h3>***
+
 ## Características principales
 
 - **Topología mesh** basada en flooding controlado con TTL y supresión de duplicados
